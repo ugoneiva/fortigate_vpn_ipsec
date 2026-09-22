@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>FortiVPN Client</vendor>
+  <vendor_url>https://github.com/</vendor_url>
+
+  <!-- Gates ApplyProfile/Connect/Disconnect/RemoveProfile only. Status is
+       deliberately not gated by any action here — it's called by the GUI
+       every ~2s and must never be able to produce a password prompt,
+       regardless of polling frequency. See internal/daemon/service.go. -->
+  <action id="dev.fortivpn.helper.manage">
+    <description>Manage FortiGate IPsec VPN connections</description>
+    <message>Authentication is required to manage VPN connections</message>
+    <icon_name>network-vpn</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

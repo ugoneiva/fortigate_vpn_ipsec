@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=FortiVPN Client
+Comment=Connect to FortiGate IPsec VPNs
+Exec=fortivpn-gui
+Icon=fortivpn-client
+Terminal=false
+Categories=Network;

@@ -1,0 +1,8 @@
+[Unit]
+Description=FortiVPN Client privileged helper
+Documentation=https://github.com/
+
+[Service]
+Type=notify
+BusName=dev.fortivpn.Helper1
+ExecStart=/usr/lib/fortivpn-client/fortivpn-daemon

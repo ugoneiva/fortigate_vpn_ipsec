@@ -1,0 +1,15 @@
+# makepkg build output
+/packaging/pkg/
+/packaging/src/
+/packaging/*.pkg.tar.zst
+/packaging/*.pkg.tar.zst.sig
+/packaging/strongswan-ikev1/pkg/
+/packaging/strongswan-ikev1/src/
+/packaging/strongswan-ikev1/*.pkg.tar.zst
+
+# Compiled binaries staged by PKGBUILD's build()
+/packaging/fortivpn-daemon-bin
+/packaging/fortivpn-gui-bin
+
+# Upstream source fetched by makepkg (see sha512sums in the PKGBUILD)
+/packaging/strongswan-ikev1/*.tar.bz2

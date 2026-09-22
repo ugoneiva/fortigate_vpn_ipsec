@@ -1,0 +1,109 @@
+# strongSwan com IKEv1 habilitado — necessário para FortiGate dialup IKEv1.
+#
+# A partir da série 6.x o strongSwan desliga o IKEv1 por padrão ("IKEv1 is now
+# disabled by default", NEWS da 6.0) e o pacote `strongswan` do Arch/CachyOS
+# não liga --enable-ikev1. O IKEv1 fica no núcleo do charon, não em plugin, então
+# a única saída é recompilar o daemon. Com IKEv1 vem também o plugin
+# xauth-generic, que responde como cliente ao XAuth do FortiGate.
+#
+# Mesmas opções do PKGBUILD oficial do Arch (extra/strongswan 6.1.0-2), menos o
+# que não é usado aqui (NetworkManager, MySQL, bindings Python/Ruby), mais
+# --enable-ikev1. O nome é outro para o `pacman -Syu` não trocá-lo de volta pelo
+# do repositório; provides/conflicts mantêm as dependências satisfeitas.
+# Ao sair versão nova do strongswan, atualize pkgver/sha512sums e recompile.
+
+pkgname=strongswan-ikev1
+pkgver=6.1.0
+pkgrel=1
+pkgdesc='strongSwan IPsec with IKEv1 enabled (needed for FortiGate IKEv1 dialup / XAuth)'
+url='https://www.strongswan.org'
+license=('GPL-2.0-only')
+arch=('x86_64')
+depends=('curl' 'gmp' 'iproute2' 'openssl' 'sqlite' 'libcap' 'systemd-libs' 'pam')
+makedepends=('systemd')
+optdepends=('resolvconf: resolve plugin')
+provides=("strongswan=${pkgver}")
+conflicts=('strongswan')
+backup=(
+  etc/ipsec.conf
+  etc/ipsec.secrets
+  etc/swanctl/swanctl.conf
+  etc/strongswan.conf
+  etc/strongswan.d/{charon-logging.conf,charon-systemd.conf,charon.conf,pki.conf,pool.conf,starter.conf,swanctl.conf}
+)
+source=("https://download.strongswan.org/strongswan-${pkgver}.tar.bz2")
+# Mesmo hash publicado no PKGBUILD oficial do Arch.
+sha512sums=('01cea929cea2535751b5ef23eddc780a3c32ffafee640a6d5cea9a52798d0ec7030107463e8ddcc73fd0924b378a8676942297a42d79319207ecf7716badcb5f')
+
+build() {
+  local _confflags=(
+    --libexecdir=/usr/lib
+    --prefix=/usr
+    --sbindir=/usr/bin
+    --sysconfdir=/etc
+    --with-capabilities=libcap
+    --with-ipsecdir=/usr/lib/strongswan
+    --enable-ikev1
+    --enable-xauth-generic
+    --enable-aesni
+    --enable-agent
+    --enable-attr-sql
+    --enable-bypass-lan
+    --enable-chapoly
+    --enable-cmd
+    --enable-connmark
+    --enable-curl
+    --enable-dhcp
+    --enable-dnscert
+    --enable-eap-aka
+    --enable-eap-aka-3gpp2
+    --enable-eap-dynamic
+    --enable-eap-gtc
+    --enable-eap-identity
+    --enable-eap-md5
+    --enable-eap-mschapv2
+    --enable-eap-peap
+    --enable-eap-radius
+    --enable-eap-sim
+    --enable-eap-simaka-pseudonym
+    --enable-eap-simaka-reauth
+    --enable-eap-sim-file
+    --enable-eap-tls
+    --enable-eap-ttls
+    --enable-ext-auth
+    --enable-farp
+    --enable-forecast
+    --enable-ha
+    --enable-integrity-test
+    --enable-mgf1
+    --enable-ml
+    --enable-openssl
+    --enable-pkcs11
+    --enable-radattr
+    --enable-sha3
+    --enable-sql
+    --enable-sqlite
+    --enable-stroke
+    --enable-swanctl
+    --enable-systemd
+    --enable-unity
+    --enable-vici
+    --enable-xauth-eap
+    --enable-xauth-noauth
+    --enable-xauth-pam
+  )
+  cd strongswan-${pkgver}
+  ./configure "${_confflags[@]}"
+  make
+}
+
+check() {
+  cd strongswan-${pkgver}
+  # Falha cedo se o IKEv1 não entrou: é a razão de este pacote existir.
+  grep -q "XAuth authentication of" src/libcharon/.libs/libcharon.so
+}
+
+package() {
+  cd strongswan-${pkgver}
+  make DESTDIR="${pkgdir}" install
+}

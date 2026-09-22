@@ -1,0 +1,34 @@
+# Maintainer: local build, not published
+pkgname=fortivpn-client
+pkgver=0.2.6
+pkgrel=1
+pkgdesc="Desktop IPsec VPN client for FortiGate, wrapping strongSwan"
+arch=('x86_64')
+url="https://github.com/"
+license=('MIT')
+depends=('strongswan' 'polkit' 'dbus' 'gtk3')
+optdepends=('strongswan-ikev1: IKEv1 + XAuth (FortiGate dialup); Arch strongswan 6.x has IKEv1 disabled — build from packaging/strongswan-ikev1')
+makedepends=('go' 'gcc' 'pkgconf')
+install='fortivpn-client.install'
+source=()
+sha256sums=()
+
+_projdir="$startdir/.."
+
+build() {
+  cd "$_projdir"
+  go build -o packaging/fortivpn-daemon-bin ./cmd/fortivpn-daemon
+  go build -o packaging/fortivpn-gui-bin ./cmd/fortivpn-gui
+}
+
+package() {
+  install -Dm755 "$startdir/fortivpn-daemon-bin" "$pkgdir/usr/lib/fortivpn-client/fortivpn-daemon"
+  install -Dm755 "$startdir/fortivpn-gui-bin" "$pkgdir/usr/bin/fortivpn-gui"
+
+  install -Dm644 "$startdir/fortivpn-daemon.service" "$pkgdir/usr/lib/systemd/system/fortivpn-daemon.service"
+  install -Dm644 "$startdir/dev.fortivpn.Helper1.service" "$pkgdir/usr/share/dbus-1/system-services/dev.fortivpn.Helper1.service"
+  install -Dm644 "$startdir/dev.fortivpn.Helper1.conf" "$pkgdir/usr/share/dbus-1/system.d/dev.fortivpn.Helper1.conf"
+  install -Dm644 "$startdir/dev.fortivpn.helper.policy" "$pkgdir/usr/share/polkit-1/actions/dev.fortivpn.helper.policy"
+  install -Dm644 "$startdir/fortivpn-client.desktop" "$pkgdir/usr/share/applications/fortivpn-client.desktop"
+  install -Dm644 "$_projdir/internal/guiapp/assets/icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/fortivpn-client.svg"
+}

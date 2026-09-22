@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=dev.fortivpn.Helper1
+Exec=/usr/lib/fortivpn-client/fortivpn-daemon
+User=root
+SystemdService=fortivpn-daemon.service
