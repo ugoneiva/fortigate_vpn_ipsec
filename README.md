@@ -192,3 +192,7 @@ Learned against a real FortiGate (2026-09-18):
 - Status is polled every ~2s via `swanctl --list-sas` text parsing rather
   than streamed from the VICI socket — fine for a desktop client (and, per
   the architecture above, provably cheap to poll), just not instantaneous.
+
+## License
+
+GNU General Public License v3.0 — see [LICENSE](LICENSE).
