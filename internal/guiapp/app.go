@@ -5,6 +5,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
@@ -22,12 +23,16 @@ type App struct {
 	store    profile.Store
 	selected int // index into store.Profiles, -1 if none
 
-	list          *widget.List
-	statusLabel   *widget.Label
-	connectBtn    *widget.Button
-	disconnectBtn *widget.Button
-	editBtn       *widget.Button
-	removeBtn     *widget.Button
+	list      *widget.List
+	card      *statusCard
+	actionBtn *widget.Button
+	editBtn   *widget.Button
+	removeBtn *widget.Button
+
+	// Per-profile state, fed by the polling loop, for the list dots.
+	states map[string]profile.ConnState
+	// State of the selected profile, which decides what the primary button does.
+	currentState profile.ConnState
 }
 
 func Run() error {
@@ -47,8 +52,10 @@ func Run() error {
 		client:   client,
 		store:    store,
 		selected: -1,
+		states:   map[string]profile.ConnState{},
 	}
 	a.fyneApp.SetIcon(appIcon)
+	a.fyneApp.Settings().SetTheme(vpnTheme{})
 
 	a.window = a.fyneApp.NewWindow("FortiVPN Client")
 	a.window.SetIcon(appIcon)
@@ -60,7 +67,7 @@ func Run() error {
 	// "Quit" is the only way out, matching a normal desktop VPN client.
 	a.window.SetCloseIntercept(func() { a.window.Hide() })
 
-	a.window.Resize(fyne.NewSize(560, 460))
+	a.window.Resize(fyne.NewSize(640, 600))
 	a.window.ShowAndRun()
 
 	client.Close()
@@ -69,19 +76,78 @@ func Run() error {
 
 func (a *App) buildUI() {
 	a.list = a.newProfileList()
-	a.statusLabel = widget.NewLabel("No profile selected")
+	a.card = newStatusCard()
 
-	addBtn := widget.NewButtonWithIcon("Add", theme.ContentAddIcon(), func() { a.showProfileForm(nil) })
-	a.editBtn = widget.NewButtonWithIcon("Edit", theme.DocumentCreateIcon(), a.editSelected)
-	a.removeBtn = widget.NewButtonWithIcon("Remove", theme.DeleteIcon(), a.removeSelected)
-	a.connectBtn = widget.NewButtonWithIcon("Connect", theme.MediaPlayIcon(), a.connectSelected)
-	a.disconnectBtn = widget.NewButtonWithIcon("Disconnect", theme.MediaStopIcon(), a.disconnectSelected)
+	// A single primary button: connect or disconnect depending on the state.
+	// Two buttons always on screen, one of them useless, was what dated the
+	// window the most.
+	a.actionBtn = widget.NewButtonWithIcon("Connect", theme.MediaPlayIcon(), a.primaryAction)
+	a.actionBtn.Importance = widget.HighImportance
+
+	addBtn := widget.NewButtonWithIcon("", theme.ContentAddIcon(), func() { a.showProfileForm(nil) })
+	addBtn.Importance = widget.LowImportance
+	a.editBtn = widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), a.editSelected)
+	a.editBtn.Importance = widget.LowImportance
+	a.removeBtn = widget.NewButtonWithIcon("", theme.DeleteIcon(), a.removeSelected)
+	a.removeBtn.Importance = widget.LowImportance
 	a.setActionButtonsEnabled(false)
 
-	toolbar := container.NewHBox(addBtn, a.editBtn, a.removeBtn, layout.NewSpacer(), a.connectBtn, a.disconnectBtn)
-	bottom := container.NewVBox(widget.NewSeparator(), a.statusLabel, toolbar)
+	title := canvas.NewText("FortiVPN", theme.Color(theme.ColorNameForeground))
+	title.TextStyle = fyne.TextStyle{Bold: true}
+	title.TextSize = 20
+	sub := canvas.NewText("IPsec client for FortiGate", theme.Color(theme.ColorNamePlaceHolder))
+	sub.TextSize = 12
+	brand := container.NewHBox(
+		container.NewGridWrap(fyne.NewSize(32, 32), canvas.NewImageFromResource(appIcon)),
+		container.NewVBox(layout.NewSpacer(), title, sub, layout.NewSpacer()),
+	)
+	header := container.NewBorder(nil, nil, brand, container.NewHBox(addBtn, a.editBtn, a.removeBtn))
 
-	a.window.SetContent(container.NewBorder(nil, bottom, nil, nil, a.list))
+	listLabel := canvas.NewText("PROFILES", theme.Color(theme.ColorNamePlaceHolder))
+	listLabel.TextStyle = fyne.TextStyle{Bold: true}
+	listLabel.TextSize = 11
+
+	top := container.NewVBox(
+		container.NewPadded(header),
+		a.card.root,
+		container.NewPadded(listLabel),
+	)
+	footer := container.NewPadded(a.actionBtn)
+
+	a.window.SetContent(container.NewPadded(
+		container.NewBorder(top, footer, nil, nil, a.list),
+	))
+}
+
+// primaryAction disconnects when there is a tunnel (or a dangling phase 1)
+// and connects in every other case.
+func (a *App) primaryAction() {
+	switch a.currentState {
+	case profile.StateConnected, profile.StateNoTunnel, profile.StateConnecting:
+		a.disconnectSelected()
+	default:
+		a.connectSelected()
+	}
+}
+
+// reflectState keeps the primary button consistent with the profile state.
+func (a *App) reflectState(s profile.ConnState) {
+	a.currentState = s
+	switch s {
+	case profile.StateConnected, profile.StateNoTunnel:
+		a.actionBtn.SetText("Disconnect")
+		a.actionBtn.SetIcon(theme.MediaStopIcon())
+		a.actionBtn.Importance = widget.DangerImportance
+	case profile.StateConnecting:
+		a.actionBtn.SetText("Cancel")
+		a.actionBtn.SetIcon(theme.MediaStopIcon())
+		a.actionBtn.Importance = widget.MediumImportance
+	default:
+		a.actionBtn.SetText("Connect")
+		a.actionBtn.SetIcon(theme.MediaPlayIcon())
+		a.actionBtn.Importance = widget.HighImportance
+	}
+	a.actionBtn.Refresh()
 }
 
 func (a *App) setActionButtonsEnabled(enabled bool) {
@@ -94,8 +160,7 @@ func (a *App) setActionButtonsEnabled(enabled bool) {
 	}
 	set(a.editBtn)
 	set(a.removeBtn)
-	set(a.connectBtn)
-	set(a.disconnectBtn)
+	set(a.actionBtn)
 }
 
 func (a *App) selectedProfile() (profile.Profile, bool) {
@@ -116,7 +181,8 @@ func (a *App) connectSelected() {
 	if !ok {
 		return
 	}
-	a.statusLabel.SetText(fmt.Sprintf("%s: connecting…", p.Name))
+	a.reflectState(profile.StateConnecting)
+	a.card.update(p.Name, profile.ConnectionStatus{State: profile.StateConnecting}, true)
 	go func() {
 		if _, err := a.client.Connect(p.ConnName()); err != nil {
 			fyne.Do(func() { dialog.ShowError(err, a.window) })

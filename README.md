@@ -43,7 +43,12 @@ Linux.
   client, `swanctl`/`systemctl` wrappers, the D-Bus method table.
 - `internal/guiapp` — the unprivileged side: Fyne UI, tray icon (via Fyne's
   native `driver/desktop`, no separate systray dependency), D-Bus client,
-  `go-keyring` credential storage.
+  `go-keyring` credential storage. `theme.go` holds the custom dark theme
+  (state colours included) and `widgets.go` the status card and state dot.
+  `preview_test.go` renders the window headlessly for visual review:
+  `PREVIEW_DIR=/tmp/preview go test ./internal/guiapp -run TestPreviewWindow`
+  writes one PNG per UI state, which is how the layout is checked without a
+  display.
 - `internal/ipc` — the D-Bus bus name/path/interface/action constants shared
   by both binaries.
 - `cmd/fortivpn-daemon`, `cmd/fortivpn-gui` — the two binaries.

@@ -1,6 +1,6 @@
 # Maintainer: local build, not published
 pkgname=fortivpn-client
-pkgver=0.2.6
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Desktop IPsec VPN client for FortiGate, wrapping strongSwan"
 arch=('x86_64')
