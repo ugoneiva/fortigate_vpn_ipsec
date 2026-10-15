@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -258,5 +259,35 @@ func TestChildNameNumbersFromSecond(t *testing.T) {
 	}
 	if got := ChildName("fortivpn-1f8397d0", 1); got != "fortivpn-1f8397d0-2" {
 		t.Errorf("ChildName(1) = %q, want fortivpn-1f8397d0-2", got)
+	}
+}
+
+func TestRenderSecretsBindsPskToLocalIdAndResolvedGateway(t *testing.T) {
+	orig := lookupHost
+	defer func() { lookupHost = orig }()
+	lookupHost = func(host string) ([]string, error) {
+		if host == "vpn.example.test" {
+			return []string{"198.51.100.7"}, nil
+		}
+		return nil, fmt.Errorf("no such host")
+	}
+
+	// Hostname gateway + local ID: the FortiGate presents its IP, so the PSK
+	// must match the local ID and the resolved address, not only the name.
+	p := Profile{ID: "cccccccc-0000-0000-0000-000000000000", Gateway: "vpn.example.test", LocalID: "dialup-group",
+		IkeVersion: IkeV1, Ikev1Mode: Ikev1Aggressive, AuthMode: AuthPskXauth}
+	secrets := RenderSecrets(p, Credentials{PSK: "secretpsk", Username: "bob", Password: "hunter2"})
+	for _, want := range []string{"id = vpn.example.test", `id-1 = "dialup-group"`, `id-2 = "198.51.100.7"`, `secret = "secretpsk"`} {
+		if !strings.Contains(secrets, want) {
+			t.Errorf("RenderSecrets missing %q\n---\n%s", want, secrets)
+		}
+	}
+
+	// IP gateway without local ID renders exactly as before: a single id, no lookup.
+	lookupHost = func(string) ([]string, error) { t.Fatal("IP gateway must not trigger DNS"); return nil, nil }
+	p = Profile{ID: "dddddddd-0000-0000-0000-000000000000", Gateway: "203.0.113.9", IkeVersion: IkeV1, AuthMode: AuthPsk}
+	secrets = RenderSecrets(p, Credentials{PSK: "k"})
+	if strings.Contains(secrets, "id-1") || !strings.Contains(secrets, "id = 203.0.113.9") {
+		t.Errorf("IP gateway secrets changed shape\n---\n%s", secrets)
 	}
 }

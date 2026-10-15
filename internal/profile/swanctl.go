@@ -2,6 +2,7 @@ package profile
 
 import (
 	"fmt"
+	"net"
 	"strings"
 )
 
@@ -127,6 +128,39 @@ func childRemoteTS(p Profile) []string {
 	return []string{strings.Join(ts, ",")}
 }
 
+// lookupHost is replaceable in tests so rendering never depends on live DNS.
+var lookupHost = net.LookupHost
+
+// pskIdentities lists every IKE identity the PSK must be bound to.
+//
+// charon looks the PSK up by the identities actually in play during the
+// exchange: ours (LocalID, or our address) and the gateway's. A FortiGate
+// identifies itself by its IP, so a profile whose gateway is a HOSTNAME
+// ("vpn.example.com") never matched a secret bound only to that name — the
+// exchange died with "no shared key found for '<local id>' - '<gateway ip>'"
+// before the PSK was even used. Binding the secret to the local ID and to
+// the addresses the hostname resolves to covers both cases; the gateway as
+// typed stays first, so IP-based profiles render exactly as before.
+func pskIdentities(p Profile) []string {
+	ids := []string{p.Gateway}
+	seen := map[string]bool{p.Gateway: true}
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	add(p.LocalID)
+	if net.ParseIP(p.Gateway) == nil {
+		if addrs, err := lookupHost(p.Gateway); err == nil {
+			for _, a := range addrs {
+				add(a)
+			}
+		}
+	}
+	return ids
+}
+
 // RenderSecrets produces the matching secrets.conf, written 0600 by the
 // caller — never embedded in the world-readable conf.d entry.
 func RenderSecrets(p Profile, creds Credentials) string {
@@ -135,7 +169,13 @@ func RenderSecrets(p Profile, creds Credentials) string {
 
 	fmt.Fprintf(&b, "secrets {\n")
 	fmt.Fprintf(&b, "  ike-%s {\n", connName)
-	fmt.Fprintf(&b, "    id = %s\n", p.Gateway)
+	for i, id := range pskIdentities(p) {
+		if i == 0 {
+			fmt.Fprintf(&b, "    id = %s\n", id)
+		} else {
+			fmt.Fprintf(&b, "    id-%d = %q\n", i, id)
+		}
+	}
 	fmt.Fprintf(&b, "    secret = %q\n", creds.PSK)
 	fmt.Fprintf(&b, "  }\n")
 
