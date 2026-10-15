@@ -44,6 +44,10 @@ func RenderConf(p Profile, creds Credentials) string {
 	}
 	fmt.Fprintf(&b, "    send_certreq = no\n")
 	fmt.Fprintf(&b, "    vips = 0.0.0.0\n")
+	// One attempt only. Without it charon re-initiates after an XAuth/EAP
+	// failure and keeps retrying the same wrong credential, which can lock
+	// the user's directory account (seen against a real FortiGate).
+	fmt.Fprintf(&b, "    keyingtries = 1\n")
 
 	writeAuthRounds(&b, p, creds)
 
@@ -78,16 +82,28 @@ func writeAuthRounds(b *strings.Builder, p Profile, creds Credentials) {
 	}
 	remote := fmt.Sprintf("    remote {\n      auth = psk\n%s    }\n", remoteID)
 
+	// SAML profiles are saved without a credential (the token only exists at
+	// Connect time); an empty identity line would make swanctl reject the file.
+	ident := func(key string) string {
+		if creds.Username == "" {
+			return ""
+		}
+		return fmt.Sprintf("      %s = %q\n", key, creds.Username)
+	}
 	switch p.AuthMode {
 	case AuthPsk:
 		fmt.Fprintf(b, "    local {\n      auth = psk\n%s    }\n", localID)
 		b.WriteString(remote)
-	case AuthPskXauth:
+	case AuthPskXauth, AuthPskXauthSaml:
 		fmt.Fprintf(b, "    local1 {\n      auth = psk\n%s    }\n", localID)
-		fmt.Fprintf(b, "    local2 {\n      auth = xauth\n      xauth_id = %q\n    }\n", creds.Username)
+		fmt.Fprintf(b, "    local2 {\n      auth = xauth\n%s    }\n", ident("xauth_id"))
 		b.WriteString(remote)
 	case AuthEapMschapv2:
-		fmt.Fprintf(b, "    local {\n      auth = eap-mschapv2\n      eap_id = %q\n    }\n", creds.Username)
+		fmt.Fprintf(b, "    local {\n      auth = eap-mschapv2\n%s    }\n", ident("eap_id"))
+		b.WriteString(remote)
+	case AuthPskEapSaml:
+		// FortiGate SAML over IKEv2: generic EAP, identity = SAML UID, secret = token.
+		fmt.Fprintf(b, "    local {\n      auth = eap\n%s%s    }\n", localID, ident("eap_id"))
 		b.WriteString(remote)
 	}
 }
@@ -179,13 +195,17 @@ func RenderSecrets(p Profile, creds Credentials) string {
 	fmt.Fprintf(&b, "    secret = %q\n", creds.PSK)
 	fmt.Fprintf(&b, "  }\n")
 
+	if creds.Username == "" {
+		fmt.Fprintf(&b, "}\n")
+		return b.String()
+	}
 	switch p.AuthMode {
-	case AuthPskXauth:
+	case AuthPskXauth, AuthPskXauthSaml:
 		fmt.Fprintf(&b, "  xauth-%s {\n", connName)
 		fmt.Fprintf(&b, "    id = %q\n", creds.Username)
 		fmt.Fprintf(&b, "    secret = %q\n", creds.Password)
 		fmt.Fprintf(&b, "  }\n")
-	case AuthEapMschapv2:
+	case AuthEapMschapv2, AuthPskEapSaml:
 		fmt.Fprintf(&b, "  eap-%s {\n", connName)
 		fmt.Fprintf(&b, "    id = %q\n", creds.Username)
 		fmt.Fprintf(&b, "    secret = %q\n", creds.Password)

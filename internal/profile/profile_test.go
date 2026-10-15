@@ -291,3 +291,44 @@ func TestRenderSecretsBindsPskToLocalIdAndResolvedGateway(t *testing.T) {
 		t.Errorf("IP gateway secrets changed shape\n---\n%s", secrets)
 	}
 }
+
+func TestRenderSAMLModes(t *testing.T) {
+	orig := lookupHost
+	defer func() { lookupHost = orig }()
+	lookupHost = func(string) ([]string, error) { return nil, fmt.Errorf("offline") }
+
+	p := Profile{ID: "eeeeeeee-0000-0000-0000-000000000000", Gateway: "203.0.113.20", LocalID: "dialup-saml",
+		IkeVersion: IkeV1, Ikev1Mode: Ikev1Aggressive, AuthMode: AuthPskXauthSaml,
+		Proposals:   Proposals{IKE: []string{"aes256-sha256-modp1536"}, ESP: []string{"aes256-sha256-modp1536"}},
+		SplitTunnel: SplitTunnel{Kind: SplitTunnelCustom, CIDRs: []string{"10.0.0.0/8"}}}
+
+	// Saved without a user credential: valid conf, no empty identity, no XAuth secret.
+	conf, secrets := RenderConf(p, Credentials{PSK: "k"}), RenderSecrets(p, Credentials{PSK: "k"})
+	if strings.Contains(conf, `xauth_id = ""`) || !strings.Contains(conf, "auth = xauth") || strings.Contains(secrets, "xauth-") {
+		t.Errorf("credential-less SAML profile rendered badly\n%s\n%s", conf, secrets)
+	}
+	// At connect time: UID + one-time token over XAuth, single attempt.
+	creds := Credentials{PSK: "k", Username: "0A1B2C3D4E5F60718293A4B5C6D7E8F9", Password: "tok"}
+	conf, secrets = RenderConf(p, creds), RenderSecrets(p, creds)
+	for _, want := range []string{`xauth_id = "0A1B2C3D4E5F60718293A4B5C6D7E8F9"`, "keyingtries = 1", "remote_ts = 10.0.0.0/8"} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("conf missing %q\n%s", want, conf)
+		}
+	}
+	if !strings.Contains(secrets, `secret = "tok"`) || !strings.Contains(secrets, `id = "0A1B2C3D4E5F60718293A4B5C6D7E8F9"`) {
+		t.Errorf("secrets missing the SAML credential\n%s", secrets)
+	}
+
+	// IKEv2: generic EAP with the UID as eap_id.
+	p.IkeVersion, p.Ikev1Mode, p.AuthMode = IkeV2, "", AuthPskEapSaml
+	conf, secrets = RenderConf(p, creds), RenderSecrets(p, creds)
+	if !strings.Contains(conf, "auth = eap\n") || !strings.Contains(conf, `eap_id = "0A1B2C3D4E5F60718293A4B5C6D7E8F9"`) || !strings.Contains(secrets, "eap-") {
+		t.Errorf("IKEv2 SAML rendered badly\n%s\n%s", conf, secrets)
+	}
+	if !p.AuthMode.IsSAML() || p.AuthMode.IsXauth() || !AuthPskXauthSaml.IsXauth() {
+		t.Error("auth-mode helpers wrong")
+	}
+	if h, port := (Profile{Gateway: "gw.example.test"}).SAMLEndpoint(); h != "gw.example.test" || port != 9443 {
+		t.Errorf("SAMLEndpoint defaults: %s %d", h, port)
+	}
+}

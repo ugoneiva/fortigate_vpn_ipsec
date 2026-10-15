@@ -2,6 +2,8 @@ package guiapp
 
 import (
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -13,6 +15,10 @@ import (
 )
 
 var proposalCiphers = []string{"aes128", "aes192", "aes256"}
+
+// authSAML is the auth-mode choice for FortiGate browser (SAML) login.
+const authSAML = "PSK + SAML (browser login)"
+
 var proposalIntegrities = []string{"sha1", "sha256", "sha384", "sha512"}
 
 // showProfileForm opens the Add/Edit dialog. existing == nil means Add.
@@ -80,13 +86,23 @@ func (a *App) showProfileForm(existing *profile.Profile) {
 	passwordEntry.SetText(creds.Password)
 	usernameRow := formRow("Username", usernameEntry)
 	passwordRow := formRow("Password", passwordEntry)
+	samlHostEntry := widget.NewEntry()
+	samlHostEntry.SetPlaceHolder("name on the gateway's certificate — blank uses Gateway")
+	samlHostEntry.SetText(p.SAMLHost)
+	samlPortEntry := widget.NewEntry()
+	samlPortEntry.SetPlaceHolder("9443")
+	if p.SAMLPort != 0 {
+		samlPortEntry.SetText(strconv.Itoa(p.SAMLPort))
+	}
+	samlHostRow := formRow("SAML host", samlHostEntry)
+	samlPortRow := formRow("SAML port", samlPortEntry)
 
 	updateAuthOptions := func() {
 		if ikeVersionRadio.Selected == "IKEv1" {
-			authModeSelect.Options = []string{"PSK only", "PSK + XAuth"}
+			authModeSelect.Options = []string{"PSK only", "PSK + XAuth", authSAML}
 			ikev1ModeRadio.Show()
 		} else {
-			authModeSelect.Options = []string{"PSK + EAP-MSCHAPv2"}
+			authModeSelect.Options = []string{"PSK + EAP-MSCHAPv2", authSAML}
 			ikev1ModeRadio.Hide()
 		}
 		authModeSelect.Refresh()
@@ -101,6 +117,13 @@ func (a *App) showProfileForm(existing *profile.Profile) {
 		} else {
 			usernameRow.Hide()
 			passwordRow.Hide()
+		}
+		if authModeSelect.Selected == authSAML {
+			samlHostRow.Show()
+			samlPortRow.Show()
+		} else {
+			samlHostRow.Hide()
+			samlPortRow.Hide()
 		}
 	}
 	ikeVersionRadio.OnChanged = func(string) { updateAuthOptions(); updateCredentialRows() }
@@ -124,6 +147,8 @@ func (a *App) showProfileForm(existing *profile.Profile) {
 		authModeSelect.SetSelected("PSK + XAuth")
 	case profile.AuthEapMschapv2:
 		authModeSelect.SetSelected("PSK + EAP-MSCHAPv2")
+	case profile.AuthPskXauthSaml, profile.AuthPskEapSaml:
+		authModeSelect.SetSelected(authSAML)
 	}
 	updateCredentialRows()
 
@@ -165,6 +190,8 @@ func (a *App) showProfileForm(existing *profile.Profile) {
 		formRow("Pre-Shared Key", pskEntry),
 		usernameRow,
 		passwordRow,
+		samlHostRow,
+		samlPortRow,
 		widget.NewSeparator(),
 		widget.NewLabelWithStyle("IKE Proposal", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewLabel("Ciphers (select at least one)"),
@@ -220,6 +247,28 @@ func (a *App) showProfileForm(existing *profile.Profile) {
 			p.AuthMode = profile.AuthPskXauth
 		case "PSK + EAP-MSCHAPv2":
 			p.AuthMode = profile.AuthEapMschapv2
+		case authSAML:
+			if p.IkeVersion == profile.IkeV1 {
+				p.AuthMode = profile.AuthPskXauthSaml
+			} else {
+				p.AuthMode = profile.AuthPskEapSaml
+			}
+		}
+		p.SAMLHost, p.SAMLPort = "", 0
+		if p.AuthMode.IsSAML() {
+			p.SAMLHost = strings.TrimSpace(samlHostEntry.Text)
+			if p.SAMLHost == "" && net.ParseIP(p.Gateway) != nil {
+				dialog.ShowError(fmt.Errorf("the gateway is an IP address: set SAML host to the name on the gateway's certificate"), a.window)
+				return
+			}
+			if t := strings.TrimSpace(samlPortEntry.Text); t != "" {
+				port, err := strconv.Atoi(t)
+				if err != nil || port < 1 || port > 65535 {
+					dialog.ShowError(fmt.Errorf("invalid SAML port %q", t), a.window)
+					return
+				}
+				p.SAMLPort = port
+			}
 		}
 
 		ikeGroups := selectedKeywords(ikeDHGroups.Selected, dhByLabel)
@@ -249,6 +298,10 @@ func (a *App) showProfileForm(existing *profile.Profile) {
 		creds.PSK = pskEntry.Text
 		creds.Username = usernameEntry.Text
 		creds.Password = passwordEntry.Text
+		if p.AuthMode.IsSAML() {
+			// The user credential is a one-time token fetched at Connect; never store one.
+			creds.Username, creds.Password = "", ""
+		}
 
 		a.saveProfile(p, creds, isNew)
 	}, a.window)

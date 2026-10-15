@@ -34,7 +34,22 @@ const (
 	AuthPsk         AuthMode = "psk"          // IKEv1, PSK only
 	AuthPskXauth    AuthMode = "psk_xauth"    // IKEv1, PSK + XAuth
 	AuthEapMschapv2 AuthMode = "eap_mschapv2" // IKEv2, PSK (gateway) + EAP-MSCHAPv2 (user)
+
+	// SAML (browser login against the FortiGate's IdP, e.g. Entra ID). The
+	// FortiGate hands back a one-time token; the client presents
+	// <UID, token> as the user credential: XAuth on IKEv1, EAP on IKEv2.
+	// Fortinet documents SAML for IKEv2 only, but the XAuth variant was
+	// proven against a real FortiGate (2026-10-15). The token
+	// is never stored: the GUI fetches a fresh one on every Connect.
+	AuthPskXauthSaml AuthMode = "psk_xauth_saml" // IKEv1, PSK + SAML token over XAuth
+	AuthPskEapSaml   AuthMode = "psk_eap_saml"   // IKEv2, PSK + SAML token over EAP
 )
+
+// IsSAML reports whether the user credential comes from a browser login.
+func (m AuthMode) IsSAML() bool { return m == AuthPskXauthSaml || m == AuthPskEapSaml }
+
+// IsXauth reports whether the profile needs the XAuth client plugin.
+func (m AuthMode) IsXauth() bool { return m == AuthPskXauth || m == AuthPskXauthSaml }
 
 type SplitTunnelKind string
 
@@ -78,6 +93,24 @@ type Profile struct {
 	Proposals   Proposals   `toml:"proposals" json:"proposals"`
 	SplitTunnel SplitTunnel `toml:"split_tunnel" json:"split_tunnel"`
 	DPDDelay    string      `toml:"dpd_delay" json:"dpd_delay"`
+	// SAMLHost/SAMLPort: where the FortiGate's SAML service answers (FortiClient
+	// "ike_saml_port", 9443 by default here; FortiOS default is 1001). The host
+	// must be the NAME on the gateway's TLS certificate, which is why it is
+	// separate from Gateway (profiles often pin the gateway by IP).
+	SAMLHost string `toml:"saml_host,omitempty" json:"saml_host,omitempty"`
+	SAMLPort int    `toml:"saml_port,omitempty" json:"saml_port,omitempty"`
+}
+
+// SAMLEndpoint is the host and port of the SAML service, with defaults.
+func (p Profile) SAMLEndpoint() (string, int) {
+	host, port := p.SAMLHost, p.SAMLPort
+	if host == "" {
+		host = p.Gateway
+	}
+	if port == 0 {
+		port = 9443
+	}
+	return host, port
 }
 
 // ConnName is the deterministic swanctl connection name and conf.d file

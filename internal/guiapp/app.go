@@ -1,7 +1,10 @@
 package guiapp
 
 import (
+	"context"
 	"fmt"
+	"net/url"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -13,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"fortivpn-client/internal/profile"
+	"fortivpn-client/internal/saml"
 )
 
 type App struct {
@@ -183,11 +187,69 @@ func (a *App) connectSelected() {
 	}
 	a.reflectState(profile.StateConnecting)
 	a.card.update(p.Name, profile.ConnectionStatus{State: profile.StateConnecting}, true)
+	if p.AuthMode.IsSAML() {
+		go a.connectSAML(p)
+		return
+	}
 	go func() {
 		if _, err := a.client.Connect(p.ConnName()); err != nil {
 			fyne.Do(func() { dialog.ShowError(err, a.window) })
 		}
 	}()
+}
+
+// connectSAML runs the browser login and connects with the one-time token.
+// The token goes straight into ApplyProfile (rewriting the 0600 secrets file)
+// and is never written to the keyring: every Connect needs a fresh login.
+func (a *App) connectSAML(p profile.Profile) {
+	fail := func(err error) {
+		fyne.Do(func() {
+			dialog.ShowError(err, a.window)
+			a.reflectState(profile.StateDisconnected)
+		})
+	}
+	creds, err := LoadCredentials(p.ConnName())
+	if err != nil || creds.PSK == "" {
+		fail(fmt.Errorf("no pre-shared key saved for %s — edit the profile and set the PSK", p.Name))
+		return
+	}
+	host, port := p.SAMLEndpoint()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	sess, err := saml.Begin(ctx, nil, host, port)
+	if err != nil {
+		fail(err)
+		return
+	}
+	var waiting dialog.Dialog
+	fyne.Do(func() {
+		msg := widget.NewLabel(fmt.Sprintf("Complete the login in your browser (%s).\nThis window closes by itself when the gateway answers.", host))
+		waiting = dialog.NewCustom("SAML login", "Cancel", msg, a.window)
+		waiting.SetOnClosed(cancel)
+		waiting.Show()
+		if u, err := url.Parse(sess.LoginURL); err == nil {
+			_ = a.fyneApp.OpenURL(u)
+		}
+	})
+	res, err := sess.Wait(ctx)
+	fyne.Do(func() {
+		if waiting != nil {
+			waiting.SetOnClosed(nil)
+			waiting.Hide()
+		}
+	})
+	if err != nil {
+		fail(err)
+		return
+	}
+	creds.Username, creds.Password = res.UID, res.Token
+	if _, err := a.client.ApplyProfile(p, creds); err != nil {
+		fail(fmt.Errorf("applying profile with the SAML token: %w", err))
+		return
+	}
+	if _, err := a.client.Connect(p.ConnName()); err != nil {
+		fail(err)
+	}
 }
 
 func (a *App) disconnectSelected() {

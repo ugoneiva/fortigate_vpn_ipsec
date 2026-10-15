@@ -59,7 +59,7 @@ func applyProfile(p profile.Profile, creds profile.Credentials) error {
 	}
 
 	if p.IkeVersion == profile.IkeV1 {
-		if err := requireIkev1(p.AuthMode == profile.AuthPskXauth); err != nil {
+		if err := requireIkev1(p.AuthMode.IsXauth()); err != nil {
 			return err
 		}
 	}
