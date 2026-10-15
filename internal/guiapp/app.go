@@ -234,7 +234,9 @@ func (a *App) connectSAML(p profile.Profile) {
 	res, err := sess.Wait(ctx)
 	fyne.Do(func() {
 		if waiting != nil {
-			waiting.SetOnClosed(nil)
+			// Do NOT SetOnClosed(nil): fyne 2.8 wraps the callback and calls it
+			// on Hide, so a nil callback is a nil-pointer panic that kills the
+			// whole GUI. The callback is cancel(), harmless once Wait returned.
 			waiting.Hide()
 		}
 	})
