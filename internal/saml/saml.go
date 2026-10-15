@@ -22,7 +22,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -71,7 +70,11 @@ func Begin(ctx context.Context, client *http.Client, host string, port int) (*Se
 	}
 	s := &Session{UID: uid, listener: ln, result: make(chan Result, 1)}
 
-	body, _ := json.Marshal(map[string]string{"type": "rawData", "bytes": fmt.Sprintf("UID=%s&REDIRECT_PORT=%d", uid, RedirectPort)})
+	// Byte-for-byte the body that worked against a real FortiGate: "type"
+	// first, then "bytes". json.Marshal of a map sorts keys ("bytes" first);
+	// the gateway still answers with a login URL but the resulting token was
+	// then rejected in XAuth — the field order matters to its parser.
+	body := []byte(fmt.Sprintf(`{"type": "rawData", "bytes": "UID=%s&REDIRECT_PORT=%d"}`, uid, RedirectPort))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://%s:%d/saml_login?", host, port), bytes.NewReader(body))
 	if err != nil {
 		ln.Close()

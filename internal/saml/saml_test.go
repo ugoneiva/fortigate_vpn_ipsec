@@ -20,8 +20,12 @@ func TestLoginFlow(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		raw, _ := io.ReadAll(r.Body)
+		if !strings.HasPrefix(string(raw), `{"type": "rawData", "bytes": "UID=`) {
+			t.Errorf("body must keep FortiClient's field order, got %s", raw)
+		}
 		var body map[string]string
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.Unmarshal(raw, &body)
 		v, _ := url.ParseQuery(body["bytes"])
 		gotUID = v.Get("UID")
 		if v.Get("REDIRECT_PORT") != strconv.Itoa(RedirectPort) || body["type"] != "rawData" {
